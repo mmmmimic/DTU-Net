@@ -1,0 +1,41 @@
+# train a baseline regunet
+DATA:
+    DataSet: CustomDataset # "FetalTrim3" for ultrasound dataset trimester 3
+    Configs: 
+       split_index: 1
+    ClassNum: 20
+    ImageChannel: 3
+
+TRAINING:
+    ExpName: dtunet_exp1 # experiment name
+    Seed: 42
+    TrainSize: [224, 224]
+    EvalSize: [224, 224]
+    Epochs: 100
+    LearningRate: 0.00001 # *100 if SGD is activated
+    WeightDecay: 0
+    BatchSize: 16
+    UseSGD: True # if not, AdamW is activated
+    Momentum: 0.9 # only valid when SGD is activated
+    Scheduler: ReduceOnPlateau
+    Loss: 
+       dtu loss: 1
+    LossConfigs:
+       dtu loss: {} 
+    UseCUDA: True
+    TrainAugmentations: {"RandomCrop":{'width':128, 'height':128}} # input as dictionary, e.g., "RandomRotate90":{}, "RandomScale": {}, "RandomCrop":{'width':224, 'height':224}, RandomBrightnessContrast:{}, RandomGamma:{}, #RandomScale:{},RandomCrop:{'width':224, 'height':224},RandomCrop:{'width':224, 'height':224},CLAHE:{},
+    EvalAugmentations: {}   
+    CheckRate: 50 # save a checkpoint every ____ epochs
+    MonitorMetric: 'micro_iou'
+    InitLambda: 0.5
+    ReduceStep: 20
+
+MODEL:
+    Backbone: DTUNet
+    Interpolation: True # if False, transposed convolution will be activated
+
+METRICS:
+    TrainClassMetrics: ['acc', 'macro_iou']
+    TrainLossMetrics: ["loss"]    
+    EvalClassMetrics: ['acc', 'macro_iou', 'micro_iou']
+    EvalLossMetrics: ["loss"]
