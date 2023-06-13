@@ -418,7 +418,10 @@ class DTUNet(nn.Module):
         # tex_weight, topo_weight = omega, (1-omega)
 
         bg, fg = torch.split(coarse_score, [1, coarse_score.size(1)-1], dim=1)
-        bg, fg = (tex_weight*bg+topo_weight*(1-bf_mask)), tex_weight*fg+topo_weight*bf_mask
+        fg_sum = torch.sum(fg, dim=1, keepdims=True)+1e-12
+        bg, fg = (tex_weight*bg+topo_weight*(1-bf_mask)), tex_weight*fg*fg_sum+topo_weight*bf_mask*fg
+        # bg, fg = (tex_weight*bg+topo_weight*(1-bf_mask.detach())), tex_weight*fg*fg_sum+topo_weight*bf_mask.detach()*fg
+        bg = bg * fg_sum
         logit = torch.cat((bg, fg), dim=1)   
         logit = torch.nn.functional.normalize(logit, dim=1, p=1)
 
