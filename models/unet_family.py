@@ -319,13 +319,11 @@ class DTUNet(nn.Module):
         return img
 
     @staticmethod
-    def random_noise(img, mask, lambda_=0.2):
+    def random_noise_anatomy(img, mask, anatomy = 1, lambda_=0.2):
         # img: (C, H, W)
         # mask: (H, W)
-        if not mask.max(): # if black mask
-            return mask
         gray_img = torch.mean(img, dim=0) # shape (H, W)
-        foregroud_pixels = (gray_img*(mask>0)).flatten()
+        foregroud_pixels = (gray_img*(mask==anatomy)).flatten()
         avg, std = foregroud_pixels.mean(), torch.std(foregroud_pixels)
         lower_bound, upper_bound = avg - std, avg + std
 
@@ -345,13 +343,24 @@ class DTUNet(nn.Module):
         mask = mask.flatten()
         sample_idx = sample_idx[:,0]*w + sample_idx[:,1]
 
-        values = torch.unique(mask).detach().cpu().numpy()
         # pick one random foreground class as noise
-        mask.index_fill_(0, sample_idx, np.random.choice(values))
+        mask.index_fill_(0, sample_idx, anatomy)
 
         mask = mask.view(h, w)
 
-        return mask        
+        return mask            
+
+    def random_noise(self, img, mask, lambda_=0.2):
+        # img: (C, H, W)
+        # mask: (H, W)
+        if not mask.max(): # if black mask
+            return mask
+        values = torch.unique(mask).detach().cpu().numpy()
+        values = values[values!=0]
+        v = np.random.choice(values)
+        # for v in values:
+        mask = self.random_noise_anatomy(img, mask, v, lambda_)
+        return mask    
 
     def forward_once(self, x):
         l1 = self.left_conv1(x)
