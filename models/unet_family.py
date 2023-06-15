@@ -116,10 +116,7 @@ class RegUNet(nn.Module):
 
         self.up_conv1 = DeConvBlock(channels[-5], channels[-4], out_channels=channels[-5], interpolation=interpolation, **kwargs)
 
-        self.up_conv0 = DeConvBlock(0, channels[-5], out_channels=channels[-5])
-        self.fc = nn.Conv2d(channels[-5], num_classes, kernel_size=1)
-
-        # self.up_conv0 = DeConvBlock(0, channels[-5], out_channels=num_classes, **kwargs)
+        self.up_conv0 = DeConvBlock(0, channels[-5], out_channels=num_classes, interpolation=interpolation, activation=None)
 
 
     def forward(self, x):
@@ -141,11 +138,10 @@ class RegUNet(nn.Module):
         up1 = self.up_conv1(down1, up2)
         
         out = self.up_conv0(None, up1)
-        out = self.fc(out)
 
         out_dict = {}
         out_dict['logit'] = out 
-        out_dict['emb'] = emb
+        out_dict['emb'] = up1
 
         return out_dict
 
@@ -167,15 +163,15 @@ class ResUNet(nn.Module):
 
         self.skip_conv = ConvBlock(in_channels, init_channels, **kwargs)
 
-        self.up_conv4 = DeConvBlock(channels[-2], channels[-1], out_channels=channels[-2], **kwargs)
+        self.up_conv4 = DeConvBlock(channels[-2], channels[-1], out_channels=channels[-2], interpolation=interpolation, **kwargs)
 
-        self.up_conv3 = DeConvBlock(channels[-3], channels[-2], out_channels=channels[-3], **kwargs)
+        self.up_conv3 = DeConvBlock(channels[-3], channels[-2], out_channels=channels[-3], interpolation=interpolation, **kwargs)
 
-        self.up_conv2 = DeConvBlock(channels[-4], channels[-3], out_channels=channels[-4], **kwargs)
+        self.up_conv2 = DeConvBlock(channels[-4], channels[-3], out_channels=channels[-4], interpolation=interpolation, **kwargs)
 
-        self.up_conv1 = DeConvBlock(channels[-5], channels[-4], out_channels=channels[-5], **kwargs)
+        self.up_conv1 = DeConvBlock(channels[-5], channels[-4], out_channels=channels[-5], interpolation=interpolation, **kwargs)
 
-        self.up_conv0 = DeConvBlock(init_channels, channels[-5], out_channels=num_classes, **kwargs)
+        self.up_conv0 = DeConvBlock(init_channels, channels[-5], out_channels=num_classes, interpolation=interpolation, **kwargs)
 
     def forward(self, x):
         x = x['image']
@@ -252,10 +248,10 @@ class FlexUNet(nn.Module):
         return out
 
 class DTUNet(nn.Module):
-    def __init__(self, in_channels, out_channels, interpolation=True): # , quality_head=True
+    def __init__(self, in_channels, out_channels, interpolation=True):
         super().__init__()
-        # self.unet = FlexUNet(in_channels, out_channels, pair_num=3, interpolation=interpolation)
-        self.unet = RegUNet(in_channels, num_classes=out_channels, interpolation=interpolation)
+        # self.unet = RegUNet(in_channels, num_classes=out_channels, interpolation=interpolation) # you can change it to either U-Net you like
+        self.unet = FlexUNet(in_channels, out_channels, interpolation=interpolation)
         # toponet
         self.left_conv1 = ConvBlock(out_channels, 64)
         self.left_conv2 = nn.Sequential(
@@ -271,24 +267,26 @@ class DTUNet(nn.Module):
             ConvBlock(256, 512)
             )        
 
-        self.right_conv4 = DeConvBlock(256, 512, 256, interpolation=interpolation)
-        self.right_conv3 = DeConvBlock(128, 256, 128, interpolation=interpolation)
-        self.right_conv2 = DeConvBlock(64, 128, 64, interpolation=interpolation)
+        self.right_conv4 = DeConvBlock(256, 512, 256)
+        self.right_conv3 = DeConvBlock(128, 256, 128)
+        self.right_conv2 = DeConvBlock(64, 128, 64)
         self.last_conv = nn.Conv2d(64, 1, kernel_size=1, 
-                                   padding=0, stride=1)             
+                                   padding=0, stride=1)   
+
+        self.senet = nn.Sequential(
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Linear(256, 512),
+                    nn.Sigmoid()
+        )      
 
         self.class_num = out_channels
 
-        # self.attention_module = nn.Sequential(
-        #                 Conv3x3(in_channels+out_channels+1, 32),
-        #                 Conv3x3(32, 32),
-        #                 Conv3x3(32, 2)
-        # )
-        # self.attention_module = nn.Sequential(
-        #                 Conv3x3(in_channels, 64),
-        #                 Conv3x3(64, 32),
-        #                 Conv3x3(32, 2, activation=None)
-        # )
+        self.attention_module = nn.Sequential(
+                        Conv3x3(in_channels+out_channels+1, 32),
+                        Conv3x3(32, 32),
+                        Conv3x3(32, 2)
+        )
 
     @staticmethod
     def random_erase(img, lambda_=0.2):
@@ -319,7 +317,7 @@ class DTUNet(nn.Module):
         img = img.view(h, w)
 
         return img
-    
+
     @staticmethod
     def random_noise_anatomy(img, mask, anatomy = 1, lambda_=0.2):
         # img: (C, H, W)
@@ -359,7 +357,7 @@ class DTUNet(nn.Module):
             return mask
         values = torch.unique(mask).detach().cpu().numpy()
         values = values[values!=0]
-        v = np.random.choice(values)
+        v = np.random.choice(values) # to accelarate the computing speed, randomly pick one foreground category
         # for v in values:
         mask = self.random_noise_anatomy(img, mask, v, lambda_)
         return mask    
@@ -370,38 +368,46 @@ class DTUNet(nn.Module):
         l3 = self.left_conv3(l2)
         l4 = self.left_conv4(l3)
         return l1, l2, l3, l4
+    
+    def se_forward(self, x):
+        global_feat = x.flatten(-2).mean(-1)
+        att_score = self.senet(global_feat).unsqueeze(-1).unsqueeze(-1)
+        x = att_score * x
+        return x
 
     def forward(self, x):
         # coarse segmentation
         unet_out = self.unet(x) # [B, C, H, W]
         coarse_logit = unet_out['logit']
-        emb = unet_out['emb']
+        lambda_ = x['lambda'] if 'lambda' in x.keys() else 0.5
 
         coarse_score = torch.softmax(coarse_logit, dim=1)
 
         anchor_features = self.forward_once(coarse_score)
 
         if self.training: # during training, activate triplet loss
-            lambda_ = x['lambda_']
             mask = x['mask']
             crp_mask = torch.zeros_like(mask)
-            lambda_ = 0.5-(x['epoch']-start_epoch)/total_epoch*0.4
-
             for i in range(mask.size(0)):
-                crp_mask[i,...] = self.random_erase(mask[i,...].clone(), lambda_=lambda_)
-                crp_mask[i,...] = self.random_noise(x['image'][i,...], crp_mask[i,...], lambda_=lambda_)
-                
+                crp_mask[i,...] = self.random_erase(mask[i,...], lambda_)
+                crp_mask[i,...] = self.random_noise(x['image'][i,...], crp_mask[i,...], lambda_)
+
             mask = F.one_hot(mask.long(), self.class_num).permute(0,3,1,2).float()
             crp_mask = F.one_hot(crp_mask.long(), self.class_num).permute(0,3,1,2).float()
 
             mask_features = self.forward_once(mask)[-1]
             crp_mask_features = self.forward_once(crp_mask)[-1]
-    
-            triplet_loss = nn.TripletMarginLoss(margin=0.1)(anchor_features[-1], 
+            anchor_features_ = anchor_features[-1]
+
+            anchor_features_= self.se_forward(anchor_features_)
+            mask_features = self.se_forward(mask_features)
+            crp_mask_features = self.se_forward(crp_mask_features)
+
+            triplet_loss = nn.TripletMarginLoss(margin=0.1)(anchor_features_, 
                             mask_features, crp_mask_features)
         else:
             triplet_loss = torch.tensor([0]).to(coarse_score.device)
-        # triplet_loss = torch.tensor([0]).to(coarse_score.device)
+
         l1, l2, l3, l4 = anchor_features
         r3 = self.right_conv4(l3, l4)
         r2 = self.right_conv3(l2, r3)
@@ -412,53 +418,26 @@ class DTUNet(nn.Module):
             bf_mask = F.interpolate(bf_mask, (coarse_score.size(-2), 
                                 coarse_score.size(-1)))
 
-        # weight = self.attention_module(torch.cat((coarse_score, bf_mask, x['image']), dim=1))
-        # weight = self.attention_module(torch.cat((coarse_score, bf_mask), dim=1))
-        # weight = self.attention_module(-x['image'])
-        # weight = torch.softmax(weight, dim=1)
-        # tex_weight, topo_weight = torch.split(weight, [1,1], dim=1)
+        weight = self.attention_module(torch.cat((coarse_score, bf_mask, x['image']), dim=1))
+        weight = torch.softmax(weight, dim=1)
+        tex_weight, topo_weight = torch.split(weight, [1,1], dim=1) # in this revised version, we learn omega adaptively for each pixel, this requires `dicefocal_loss_fine` in the loss function
 
-        tex_weight = torch.ones_like(bf_mask)*0.3
-        topo_weight = torch.ones_like(bf_mask)*0.7
-
-        # bf_mask = bf_mask / (bf_mask.max() + 1e-12)
-
-        # tex_weight = torch.ones_like(bf_mask)*0
-        # topo_weight = torch.ones_like(bf_mask)*1
+        'uncommend the following two lines if you would like to use the version described in the paper'
+        # omega = 0.5  # revise here for omega in the paper
+        # tex_weight, topo_weight = omega, (1-omega)
 
         bg, fg = torch.split(coarse_score, [1, coarse_score.size(1)-1], dim=1)
-        # bg, fg = torch.split(coarse_score.detach(), [1, coarse_score.size(1)-1], dim=1)
-
         fg_sum = torch.sum(fg, dim=1, keepdims=True)+1e-12
         bg, fg = (tex_weight*bg+topo_weight*(1-bf_mask)), tex_weight*fg*fg_sum+topo_weight*bf_mask*fg
         # bg, fg = (tex_weight*bg+topo_weight*(1-bf_mask.detach())), tex_weight*fg*fg_sum+topo_weight*bf_mask.detach()*fg
         bg = bg * fg_sum
-
-        # bg = bg*(1-bf_mask)
-        # fg = fg*bf_mask
-
         logit = torch.cat((bg, fg), dim=1)   
         logit = torch.nn.functional.normalize(logit, dim=1, p=1)
-        
+
         out = {}
         out['coarse_logit'] = coarse_logit
         out['logit'] = logit
         out['topo_mask'] = bf_mask.squeeze(1)
         out['triplet_loss'] = triplet_loss
-        out['emb'] = emb
-        out['topo_weight'] = topo_weight
 
         return out
-
-if __name__ == "__main__":
-    # model = RegUNet(1, 5).cuda()
-    # model = UNet(1, 5).cuda()
-    # model = ResUNet(1, 5).cuda()
-    # model = DTUNet(1, 5).cuda()
-    model = FlexUNet(1, 5).cuda()
-    x = torch.rand(3, 1, 224, 224).cuda()
-    x = {'image':x}
-    model.eval()
-    x = model(x)
-    print(x['logit'].shape)
-    
