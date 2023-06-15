@@ -86,25 +86,24 @@ class DeConvBlock(nn.Module):
     def __init__(self, left_channels, right_channels, out_channels, interpolation=True, **kwargs):
         super().__init__()
 
-        self.up = nn.Upsample(scale_factor=2) if interpolation else nn.Sequential(nn.ConvTranspose2d(left_channels, 
-                                                                            left_channels,  
-                                                                            kernel_size=2, 
-                                                                            stride=2,
-                                                                            padding=0,
-                                                                            bias=True),
-                                                                            nn.ReLU())
-        self.conv = ConvBlock(left_channels+right_channels, out_channels, **kwargs) if interpolation else ConvBlock(right_channels+left_channels, 
-                                                                                                    out_channels, **kwargs)
-        # feature seuqeeze not applied here
-        # self.up = nn.Sequential(nn.Upsample(scale_factor=2), ConvBlock(right_channels, right_channels//2, **kwargs)) if interpolation else nn.Sequential(nn.ConvTranspose2d(right_channels, 
-        #                                                                     right_channels//2,  
-        #                                                                     kernel_size=2, 
-        #                                                                     stride=2,
-        #                                                                     padding=0,
-        #                                                                     bias=True),
-        #                                                                     nn.ReLU())
-        # self.conv = ConvBlock(left_channels+right_channels//2, out_channels, **kwargs) if interpolation else ConvBlock(right_channels//2+left_channels, 
-        #                                                                                             out_channels, **kwargs)
+        #self.up = nn.Upsample(scale_factor=2) if interpolation else nn.Sequential(nn.ConvTranspose2d(left_channels, 
+        #                                                                    left_channels,  
+        #                                                                    kernel_size=2, 
+        #                                                                    stride=2,
+        #                                                                    padding=0,
+        #                                                                    bias=True),
+        #                                                                    nn.ReLU())
+        #self.conv = ConvBlock(left_channels+right_channels, out_channels, **kwargs) if interpolation else ConvBlock(right_channels+left_channels, 
+        #                                                                                            out_channels, **kwargs)
+         self.up = nn.Sequential(nn.Upsample(scale_factor=2), ConvBlock(right_channels, right_channels//2, **kwargs), nn.BatchNorm2d(right_channels//2), nn.ReLU()) if interpolation else nn.Sequential(nn.ConvTranspose2d(right_channels, 
+                                                                             right_channels//2,  
+                                                                             kernel_size=2, 
+                                                                             stride=2,
+                                                                             padding=0,
+                                                                             bias=True),
+                                                                             nn.ReLU())
+         self.conv = ConvBlock(left_channels+right_channels//2, out_channels, **kwargs) if interpolation else ConvBlock(right_channels//2+left_channels, 
+                                                                                                     out_channels, **kwargs)
 
     def forward(self, x1, x2):
         x2 = self.up(x2)
