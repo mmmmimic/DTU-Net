@@ -381,9 +381,8 @@ class DTUNet(nn.Module):
 
         anchor_features = self.forward_once(coarse_score)
 
-        start_epoch = 15
-        total_epoch = 200
-        if self.training and x['epoch'] >= start_epoch: # during training, activate triplet loss
+        if self.training: # during training, activate triplet loss
+            lambda_ = x['lambda_']
             mask = x['mask']
             crp_mask = torch.zeros_like(mask)
             lambda_ = 0.5-(x['epoch']-start_epoch)/total_epoch*0.4
@@ -391,16 +390,6 @@ class DTUNet(nn.Module):
             for i in range(mask.size(0)):
                 crp_mask[i,...] = self.random_erase(mask[i,...].clone(), lambda_=lambda_)
                 crp_mask[i,...] = self.random_noise(x['image'][i,...], crp_mask[i,...], lambda_=lambda_)
-
-            # import matplotlib.pyplot as plt
-            # plt.figure()
-            # plt.subplot(1,2,1)
-            # plt.imshow(mask[0,...].detach().cpu().numpy())
-            # plt.axis('off')
-            # plt.subplot(1,2,2)
-            # plt.imshow(crp_mask[0,...].detach().cpu().numpy())
-            # plt.axis('off')
-            # plt.show()
                 
             mask = F.one_hot(mask.long(), self.class_num).permute(0,3,1,2).float()
             crp_mask = F.one_hot(crp_mask.long(), self.class_num).permute(0,3,1,2).float()
